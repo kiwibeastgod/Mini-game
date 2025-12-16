@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Dodge Game</title>
+  <style>
+    body { margin:0; font-family: system-ui, Arial; display:grid; place-items:center; min-height:100vh; background:#f6f6f6; }
+    .wrap { width:min(720px, 94vw); }
+    canvas { width:100%; height:auto; border:2px solid #111; background:#fff; border-radius:12px; display:block; }
+    .bar { display:flex; gap:12px; align-items:center; justify-content:space-between; margin:10px 2px 0; }
+    .btns { display:flex; gap:10px; }
+    button { padding:8px 12px; border:1px solid #111; background:#fff; border-radius:10px; cursor:pointer; }
+    .hint { opacity:.75; font-size:14px; margin-top:8px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <canvas id="c" width="720" height="420"></canvas>
+    <div class="bar">
+      <div><b>Score:</b> <span id="score">0</span> <span id="status"></span></div>
+      <div class="btns">
+        <button id="start">Start</button>
+        <button id="restart">Restart</button>
+      </div>
+    </div>
+    <div class="hint">Move: Arrow Keys or WASD • Goal: survive as long as possible.</div>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+  const scoreEl = document.getElementById("score");
+  const statusEl = document.getElementById("status");
+  const startBtn = document.getElementById("start");
+  const restartBtn = document.getElementById("restart");
+
+  const W = canvas.width, H = canvas.height;
+
+  const keys = new Set();
+  window.addEventListener("keydown", (e) => {
+    const k = e.key.toLowerCase();
+    if (["arrowup","arrowdown","arrowleft","arrowright","w","a","s","d"," "].includes(k)) e.preventDefault();
+    keys.add(k);
+    if (k === " " && gameOver) reset();
+  }, { passive:false });
+  window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
+
+  let running = false;
+  let gameOver = false;
+  let last = 0;
+  let score = 0;
+  let spawnTimer = 0;
+  let spawnEvery = 750; // ms (gets faster)
+
+  const player = { x: W/2, y: H-50, w: 34, h: 34, speed: 360 };
+
+  const blocks = []; // {x,y,w,h,vy}
+
+  function reset() {
+    running = true;
+    gameOver = false;
+    score = 0;
+    spawnTimer = 0;
+    spawnEvery = 750;
+    blocks.length = 0;
+    player.x = W/2 - player.w/2;
+    player.y = H-60;
+    statusEl.textContent = "";
+    scoreEl.textContent = "0";
+  }
+
+  function rand(min, max) { return Math.random() * (max - min) + min; }
+
+  function spawnBlock() {
+    const size = rand(20, 70);
+    blocks.push({
+      x: rand(0, W - size),
+      y: -size,
+      w: size,
+      h: size,
+      vy: rand(160, 320) + score * 2
+    });
+  }
+
+  function hit(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x &&
+           a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+
+  function update(dt) {
+    // movement
+    let dx = 0, dy = 0;
+    if (keys.has("arrowleft") || keys.has("a")) dx -= 1;
+    if (keys.has("arrowright") || keys.has("d")) dx += 1;
+    if (keys.has("arrowup") || keys.has("w")) dy -= 1;
+    if (keys.has("arrowdown") || keys.has("s")) dy += 1;
+
+    const len = Math.hypot(dx, dy) || 1;
+    dx /= len; dy /= len;
+
+    player.x += dx * player.speed * dt;
+    player.y += dy * player.speed * dt;
+
+    // bounds
+    player.x = Math.max(0, Math.min(W - player.w, player.x));
+    player.y = Math.max(0, Math.min(H - player.h, player.y));
+
+    // spawn blocks
+    spawnTimer += dt * 1000;
+    if (spawnTimer >= spawnEvery) {
+      spawnTimer = 0;
+      spawnBlock();
+      spawnEvery = Math.max(260, spawnEvery - 8); // ramps difficulty
+    }
+
+    // move blocks + collision
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const b = blocks[i];
+      b.y += b.vy * dt;
+
+      if (hit(player, b)) {
+        gameOver = true;
+        running = false;
+        statusEl.textContent = " — Game Over (press Space to restart)";
+      }
+
+      if (b.y > H + 80) blocks.splice(i, 1);
+    }
+
+    // score
+    score += dt * 10;
+    scoreEl.textContent = Math.floor(score);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    // background text
+    ctx.fillStyle = "#000";
+    ctx.globalAlpha = 0.06;
+    ctx.font = "700 64px system-ui, Arial";
+    ctx.fillText("DODGE", 18, 80);
+    ctx.globalAlpha = 1;
+
+    // blocks
+    ctx.fillStyle = "#111";
+    for (const b of blocks) ctx.fillRect(b.x, b.y, b.w, b.h);
+
+    // player
+    ctx.fillStyle = "#000";
+    ctx.fillRect(player.x, player.y, player.w, player.h);
+
+    // start overlay
+    if (!running && !gameOver) {
+      ctx.fillStyle = "rgba(0,0,0,0.65)";
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = "#fff";
+      ctx.font = "700 28px system-ui, Arial";
+      ctx.fillText("Click Start to play", 240, 210);
+      ctx.font = "16px system-ui, Arial";
+      ctx.fillText("Move with Arrow Keys or WASD", 238, 240);
+    }
+  }
+
+  function loop(t) {
+    const dt = Math.min(0.033, (t - last) / 1000 || 0); // cap
+    last = t;
+    if (running) update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  startBtn.addEventListener("click", () => { if (!running) reset(); });
+  restartBtn.addEventListener("click", () => reset());
+
+  // init
+  running = false;
+  gameOver = false;
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
